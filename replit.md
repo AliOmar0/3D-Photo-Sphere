@@ -31,6 +31,7 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
   - Mouse drag / scroll / touch fallback
   - Starfield background (warp effect in tunnel mode)
 - **Note**: Requires WebGL — works in a full browser tab. Replit's embedded preview iframe doesn't support WebGL.
+- **GitHub Pages deploy**: `.github/workflows/deploy.yml` builds the artifact with `BASE_PATH=/3D-Photo-Sphere/` and publishes to GitHub Pages on every push to `main`. Repo Settings → Pages → Source must be set to "GitHub Actions". Live URL: `https://aliomar0.github.io/3D-Photo-Sphere/`.
 
 ## Key Commands
 
