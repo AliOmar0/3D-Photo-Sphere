@@ -33,6 +33,10 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Note**: Requires WebGL — works in a full browser tab. Replit's embedded preview iframe doesn't support WebGL.
 - **GitHub Pages deploy**: `.github/workflows/deploy.yml` builds the artifact with `BASE_PATH=/3D-Photo-Sphere/` and publishes to GitHub Pages on every push to `main`. Repo Settings → Pages → Source must be set to "GitHub Actions". Live URL: `https://aliomar0.github.io/3D-Photo-Sphere/`.
 
+## Git author
+
+Local `.git/config` is set to `user.name = "Ali Omar"` / `user.email = "alidawood098@gmail.com"` so future commits use this identity. A history-rewritten bundle (all past commits re-authored as Ali Omar) is stored at `.local/rewritten-history.bundle`; see `.local/REWRITE_AUTHOR_INSTRUCTIONS.md` for the one-time push to apply it to GitHub.
+
 ## Key Commands
 
 - `pnpm run typecheck` — full typecheck across all packages
