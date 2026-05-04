@@ -16,6 +16,22 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
 
+## Artifacts
+
+### 3D Photo Sphere (`artifacts/photo-sphere`)
+- **Preview path**: `/`
+- **Stack**: React + Vite + Three.js + MediaPipe Hands
+- **Description**: Interactive 3D photo dump in a sphere with webcam-based hand tracking
+- **Features**:
+  - 24 photos distributed on a sphere using fibonacci lattice (Three.js)
+  - MediaPipe Hands for real-time hand gesture detection
+  - Right hand pinch + move up/down → zoom in/out
+  - Left hand pinch + drag → rotate sphere
+  - Fist vs open palm → controls auto-rotation speed
+  - Mouse drag / scroll / touch fallback for non-webcam use
+  - Starfield background
+- **Note**: Requires WebGL — works in a full browser tab. Replit's embedded preview iframe doesn't support WebGL.
+
 ## Key Commands
 
 - `pnpm run typecheck` — full typecheck across all packages

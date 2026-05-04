@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "3D Photo Sphere"
+version = "1.0.0"
+id = "artifacts/photo-sphere"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19374
+
+[services.development]
+run = "pnpm --filter @workspace/photo-sphere run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/photo-sphere", "run", "build" ]
+publicDir = "artifacts/photo-sphere/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19374"
+BASE_PATH = "/"
