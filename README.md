@@ -36,10 +36,6 @@ pnpm --filter @workspace/photo-sphere run dev
 
 Then open the dev URL in a normal browser tab.
 
-## Deployment
-
-Pushing to `main` triggers `.github/workflows/deploy.yml`, which builds the app with the correct base path (`/3D-Photo-Sphere/`) and publishes it to GitHub Pages. Make sure the repo's **Settings → Pages → Source** is set to **GitHub Actions**.
-
 ## Author
 
 Built by **Ali Omar** ([@AliOmar0](https://github.com/AliOmar0)).
