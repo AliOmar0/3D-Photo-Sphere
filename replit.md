@@ -23,13 +23,13 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Stack**: React + Vite + Three.js + MediaPipe Hands
 - **Description**: Interactive 3D photo dump in a sphere with webcam-based hand tracking
 - **Features**:
-  - 24 photos distributed on a sphere using fibonacci lattice (Three.js)
+  - Two view modes (toggleable): **Sphere** (fibonacci-lattice photo sphere) and **Tunnel** (images fly toward camera)
+  - 64 default photos via Lorem Picsum + user upload (`+ Add your photos` button using object URLs)
   - MediaPipe Hands for real-time hand gesture detection
-  - Right hand pinch + move up/down → zoom in/out
-  - Left hand pinch + drag → rotate sphere
-  - Fist vs open palm → controls auto-rotation speed
-  - Mouse drag / scroll / touch fallback for non-webcam use
-  - Starfield background
+  - Sphere mode: right pinch + up/down = zoom, left pinch + drag = rotate, openness = auto-spin speed
+  - Tunnel mode: openness = travel speed, left pinch + drag = steer, right pinch = base speed
+  - Mouse drag / scroll / touch fallback
+  - Starfield background (warp effect in tunnel mode)
 - **Note**: Requires WebGL — works in a full browser tab. Replit's embedded preview iframe doesn't support WebGL.
 
 ## Key Commands
