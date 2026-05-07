@@ -1,31 +1,39 @@
-# 3D Photo Sphere
+# Hand-Tracking Playground
 
-An interactive 3D photo gallery inspired by an Instagram reel — your photos float on the surface of a Three.js sphere that you can spin, zoom into, and even fly through with your hands using webcam-based hand tracking.
+A hub of six small browser experiments built on **MediaPipe Hands**, **Three.js**, and your webcam. Pick a project, allow camera access, and start gesturing.
 
 **Live demo:** https://aliomar0.github.io/3D-Photo-Sphere/
 
 > Heads up: WebGL and webcam access are required, so open the live demo in a real browser tab — Replit's embedded preview iframe doesn't support WebGL.
 
-## Features
+## The six projects
 
-- **3D photo sphere** built with Three.js + React Three Fiber — photos are evenly distributed across the surface using a Fibonacci spiral
-- **Hand tracking** with MediaPipe — control the experience with gestures from your webcam
-- **Two viewing modes**
-  - *Orbit mode* — rotate and zoom around the sphere
-    - Open palm = rotate, pinch = zoom
-  - *Tunnel mode* — fly through the photos
-    - Hand openness = travel speed, left pinch + drag = steer, right pinch = base speed
-- **Mouse / touch fallback** — drag to rotate, scroll to zoom, works without a webcam
-- **Upload your own photos** — drop in any images and they're instantly placed on the sphere
-- **Animated starfield background** with a warp effect in tunnel mode
+All projects mount under hash routes so direct deep links work on GitHub Pages.
+
+| Route | Project | What it does |
+| --- | --- | --- |
+| `#/sphere` | **3D Photo Sphere** | Photos float on a Fibonacci-distributed sphere. Open palm spins it, pinch to drag and zoom. Tunnel mode lets you fly through them. |
+| `#/puzzle` | **Live Puzzle** | Your live camera feed sliced into a 3×3 sliding-tile puzzle. Pinch a tile and drag it into the empty slot. |
+| `#/particles` | **Particle Sculptor** | A cloud of 4 500 Three.js particles you can morph between heart, sphere, and free-form. Pinch attracts particles to your fingertip; open hand pushes them away. |
+| `#/draw` | **Air Draw** | Pinch your fingers to draw glowing neon strokes over your webcam. Pick a colour from the side palette; clear the canvas by holding both hands open. |
+| `#/skeleton` | **Neon Skeleton** | A rainbow MediaPipe skeleton renders over your hands with sparkle particles trailing your fingertips. Spread both hands apart to fire a lightning beam between them. |
+| `#/hud` | **Floating HUD** | A cyan tactical HUD anchored to the line between your two index fingertips, with scrolling status text, a live particle stream, and corner brackets that follow each hand. |
 
 ## Tech stack
 
 - React + Vite + TypeScript
-- Three.js / React Three Fiber / drei
+- wouter (hash router) for GitHub-Pages-friendly routing
+- Three.js / React Three Fiber / drei (sphere + particles)
 - MediaPipe Hands for webcam gesture recognition
+- Canvas2D for the puzzle, draw, skeleton, and HUD projects
 - Tailwind CSS
 - Deployed to GitHub Pages via GitHub Actions
+
+Shared building blocks live in `artifacts/photo-sphere/src/`:
+
+- `hooks/useHandTracking.ts` — webcam + MediaPipe lifecycle and gesture helpers
+- `components/ProjectShell.tsx` — back-to-hub button, title bar, status pill, controls panel, camera PIP
+- `pages/Hub.tsx` — the landing grid
 
 ## Local development
 
