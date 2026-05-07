@@ -5,8 +5,10 @@ interface ProjectCard {
   title: string;
   tagline: string;
   description: string;
-  thumb: string;
   accent: string;
+  // CSS gradient string for the cover
+  cover: string;
+  glyph: string;
 }
 
 const PROJECTS: ProjectCard[] = [
@@ -16,17 +18,21 @@ const PROJECTS: ProjectCard[] = [
     tagline: "Spin a galaxy of photos with your hand",
     description:
       "Photos floating on a 3D sphere. Open palm spins it, pinch to drag and zoom. Tunnel mode lets you fly through them.",
-    thumb: `${import.meta.env.BASE_URL}thumbs/sphere.svg`,
-    accent: "rgba(120,180,255,0.45)",
+    accent: "rgba(120,180,255,0.95)",
+    cover:
+      "radial-gradient(ellipse at 50% 40%, rgba(70,120,220,0.55) 0%, rgba(20,30,80,0.9) 50%, #06081e 100%)",
+    glyph: "◉",
   },
   {
     slug: "/puzzle",
-    title: "Live Puzzle",
-    tagline: "Solve a puzzle of your own face",
+    title: "Jigsaw Puzzle",
+    tagline: "Pinch and place puzzle pieces in mid-air",
     description:
-      "Your live camera feed sliced into a sliding-tile puzzle. Pinch a tile and drag it into the empty slot.",
-    thumb: `${import.meta.env.BASE_URL}thumbs/puzzle.jpg`,
-    accent: "rgba(180,255,180,0.45)",
+      "Form a frame with your thumb and index, pinch on a piece to grab it, drag it to the right slot, and release to snap it home.",
+    accent: "rgba(150,255,180,0.95)",
+    cover:
+      "linear-gradient(135deg, rgba(40,160,90,0.45) 0%, rgba(15,40,30,0.9) 100%)",
+    glyph: "▦",
   },
   {
     slug: "/particles",
@@ -34,8 +40,10 @@ const PROJECTS: ProjectCard[] = [
     tagline: "Push thousands of particles around",
     description:
       "A cloud of particles attracted to your fingertip. Toggle between heart, sphere, and free-form to morph the cloud.",
-    thumb: `${import.meta.env.BASE_URL}thumbs/particles.jpg`,
-    accent: "rgba(220,140,255,0.45)",
+    accent: "rgba(220,140,255,0.95)",
+    cover:
+      "radial-gradient(circle at 50% 50%, rgba(180,80,220,0.55) 0%, rgba(40,15,70,0.9) 60%, #0a0418 100%)",
+    glyph: "✦",
   },
   {
     slug: "/draw",
@@ -43,8 +51,10 @@ const PROJECTS: ProjectCard[] = [
     tagline: "Paint glowing ink in the air",
     description:
       "Pinch your fingers to draw neon strokes over your webcam. Pick a color from the side palette and clear with two open hands.",
-    thumb: `${import.meta.env.BASE_URL}thumbs/draw.jpg`,
-    accent: "rgba(120,255,230,0.5)",
+    accent: "rgba(120,255,230,0.95)",
+    cover:
+      "linear-gradient(135deg, rgba(40,180,180,0.5) 0%, rgba(15,30,55,0.9) 100%)",
+    glyph: "✎",
   },
   {
     slug: "/skeleton",
@@ -52,8 +62,10 @@ const PROJECTS: ProjectCard[] = [
     tagline: "X-ray vision for your hands",
     description:
       "Glowing rainbow skeletons render over your hands with sparkle particles. Spread your hands apart to fire a lightning beam between them.",
-    thumb: `${import.meta.env.BASE_URL}thumbs/skeleton.jpg`,
-    accent: "rgba(255,180,120,0.5)",
+    accent: "rgba(255,180,120,0.95)",
+    cover:
+      "linear-gradient(135deg, rgba(220,80,40,0.4) 0%, rgba(180,40,140,0.4) 50%, rgba(40,20,60,0.9) 100%)",
+    glyph: "✋",
   },
   {
     slug: "/hud",
@@ -61,8 +73,10 @@ const PROJECTS: ProjectCard[] = [
     tagline: "Tony Stark interface in your hands",
     description:
       "A cyan tactical HUD that follows the line between your two hands. Reads out FPS, hand metrics, and a live data stream.",
-    thumb: `${import.meta.env.BASE_URL}thumbs/hud.jpg`,
-    accent: "rgba(80,220,255,0.5)",
+    accent: "rgba(80,220,255,0.95)",
+    cover:
+      "linear-gradient(135deg, rgba(40,140,210,0.5) 0%, rgba(10,25,55,0.95) 100%)",
+    glyph: "◧",
   },
 ];
 
@@ -167,26 +181,32 @@ export function Hub() {
               <div
                 style={{
                   position: "relative",
-                  aspectRatio: "16 / 9",
-                  background: "#000",
+                  height: 110,
+                  background: p.cover,
                   overflow: "hidden",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                <img
-                  src={p.thumb}
-                  alt={p.title}
+                <div
                   style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
+                    fontSize: 56,
+                    color: p.accent,
+                    opacity: 0.85,
+                    textShadow: `0 0 24px ${p.accent}`,
+                    fontFamily: "'Inter', system-ui, sans-serif",
+                    lineHeight: 1,
                   }}
-                  loading="lazy"
-                />
+                >
+                  {p.glyph}
+                </div>
                 <div
                   style={{
                     position: "absolute",
                     inset: 0,
-                    background: `linear-gradient(180deg, transparent 50%, rgba(3,3,16,0.95) 100%)`,
+                    background:
+                      "linear-gradient(180deg, transparent 60%, rgba(3,3,16,0.6) 100%)",
                   }}
                 />
               </div>
@@ -196,7 +216,7 @@ export function Hub() {
                     fontSize: 10,
                     letterSpacing: "0.2em",
                     textTransform: "uppercase",
-                    color: p.accent.replace("0.45", "0.95").replace("0.5", "0.95"),
+                    color: p.accent,
                     marginBottom: 6,
                   }}
                 >

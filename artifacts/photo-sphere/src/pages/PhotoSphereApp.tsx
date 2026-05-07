@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Hands } from "@mediapipe/hands";
+import { Link } from "wouter";
 
 // 60+ default photos via Lorem Picsum
 const DEFAULT_PHOTOS: string[] = Array.from({ length: 64 }, (_, i) => {
@@ -661,6 +662,34 @@ export function PhotoSphereApp() {
     }}>
       <div ref={mountRef} style={{ position: "absolute", inset: 0 }} />
 
+      {/* Back-to-playground button */}
+      <Link
+        href="/"
+        data-ui
+        style={{
+          position: "absolute",
+          top: 24,
+          left: 24,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          background: "rgba(0,0,20,0.65)",
+          border: "1px solid rgba(80,140,255,0.3)",
+          color: "rgba(180,210,255,0.95)",
+          padding: "8px 14px",
+          borderRadius: 10,
+          fontSize: 12,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          textDecoration: "none",
+          backdropFilter: "blur(8px)",
+          cursor: "pointer",
+          zIndex: 50,
+        }}
+      >
+        ← Playground
+      </Link>
+
       {/* Status pill */}
       <div data-ui style={{
         position: "absolute", top: 24, left: "50%", transform: "translateX(-50%)",
@@ -695,7 +724,7 @@ export function PhotoSphereApp() {
 
       {/* Controls legend */}
       <div data-ui style={{
-        position: "absolute", top: 24, left: 24,
+        position: "absolute", top: 76, left: 24,
         color: "rgba(160,190,230,0.75)", fontSize: 12, lineHeight: 2,
         background: "rgba(0,0,20,0.6)", padding: "14px 18px", borderRadius: 14,
         border: "1px solid rgba(60,100,200,0.2)", backdropFilter: "blur(8px)",
