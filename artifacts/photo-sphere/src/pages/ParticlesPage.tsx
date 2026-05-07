@@ -10,23 +10,21 @@ import {
 
 type Shape = "heart" | "sphere" | "free";
 
-const PARTICLE_COUNT = 4500;
+const PARTICLE_COUNT = 6000;
 
 function targetForShape(shape: Shape): Float32Array {
   const arr = new Float32Array(PARTICLE_COUNT * 3);
   for (let i = 0; i < PARTICLE_COUNT; i++) {
     if (shape === "sphere") {
-      // uniform on sphere, radius 1.6
       const u = Math.random();
       const v = Math.random();
       const theta = 2 * Math.PI * u;
       const phi = Math.acos(2 * v - 1);
-      const r = 1.6;
+      const r = 1.8;
       arr[i * 3 + 0] = r * Math.sin(phi) * Math.cos(theta);
       arr[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       arr[i * 3 + 2] = r * Math.cos(phi);
     } else if (shape === "heart") {
-      // parametric heart curve, slight random thickness
       const t = Math.random() * Math.PI * 2;
       const x = 16 * Math.pow(Math.sin(t), 3);
       const y =
@@ -34,16 +32,15 @@ function targetForShape(shape: Shape): Float32Array {
         5 * Math.cos(2 * t) -
         2 * Math.cos(3 * t) -
         Math.cos(4 * t);
-      const scale = 0.11;
+      const scale = 0.13;
       const jitter = 0.18;
       arr[i * 3 + 0] = x * scale + (Math.random() - 0.5) * jitter;
       arr[i * 3 + 1] = y * scale + (Math.random() - 0.5) * jitter;
       arr[i * 3 + 2] = (Math.random() - 0.5) * jitter;
     } else {
-      // free: random cloud
-      arr[i * 3 + 0] = (Math.random() - 0.5) * 4;
-      arr[i * 3 + 1] = (Math.random() - 0.5) * 4;
-      arr[i * 3 + 2] = (Math.random() - 0.5) * 4;
+      arr[i * 3 + 0] = (Math.random() - 0.5) * 5;
+      arr[i * 3 + 1] = (Math.random() - 0.5) * 5;
+      arr[i * 3 + 2] = (Math.random() - 0.5) * 5;
     }
   }
   return arr;
@@ -55,9 +52,13 @@ export function ParticlesPage() {
   const overlayPipRef = useRef<HTMLCanvasElement>(null);
 
   const [shape, setShape] = useState<Shape>("heart");
-  const handPosRef = useRef({ x: 0, y: 0, active: false, pinch: false });
+  // Up to 2 hands tracked. Each: x,y in normalised coords + pinch + active.
+  const handsRef = useRef([
+    { x: 0, y: 0, pinch: false, active: false },
+    { x: 0, y: 0, pinch: false, active: false },
+  ]);
+  const prevPinchRef = useRef([false, false]);
 
-  // Three.js setup
   const targetsRef = useRef<Float32Array>(targetForShape("heart"));
   const sceneApiRef = useRef<{ resetTargets: (s: Shape) => void } | null>(null);
 
@@ -78,9 +79,9 @@ export function ParticlesPage() {
       0.1,
       100,
     );
-    camera.position.z = 4.2;
+    camera.position.z = 4.4;
 
-    // Particle geometry
+    // Particles
     const positions = new Float32Array(PARTICLE_COUNT * 3);
     const velocities = new Float32Array(PARTICLE_COUNT * 3);
     const colors = new Float32Array(PARTICLE_COUNT * 3);
@@ -88,8 +89,7 @@ export function ParticlesPage() {
       positions[i * 3 + 0] = (Math.random() - 0.5) * 6;
       positions[i * 3 + 1] = (Math.random() - 0.5) * 6;
       positions[i * 3 + 2] = (Math.random() - 0.5) * 6;
-      // pink/purple gradient
-      const hue = 0.78 + Math.random() * 0.08;
+      const hue = 0.78 + Math.random() * 0.1;
       const c = new THREE.Color().setHSL(hue, 0.9, 0.55 + Math.random() * 0.2);
       colors[i * 3 + 0] = c.r;
       colors[i * 3 + 1] = c.g;
@@ -100,7 +100,7 @@ export function ParticlesPage() {
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: 0.045,
+      size: 0.05,
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
@@ -109,6 +109,29 @@ export function ParticlesPage() {
     });
     const points = new THREE.Points(geo, mat);
     scene.add(points);
+
+    // Cursor "orbs" — visible markers for each hand
+    const cursorGeo = new THREE.SphereGeometry(0.18, 24, 24);
+    const cursorMats = [
+      new THREE.MeshBasicMaterial({
+        color: 0xff66ff,
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+      }),
+      new THREE.MeshBasicMaterial({
+        color: 0x66ffff,
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+      }),
+    ];
+    const cursorMeshes = cursorMats.map((m) => {
+      const mesh = new THREE.Mesh(cursorGeo, m);
+      mesh.visible = false;
+      scene.add(mesh);
+      return mesh;
+    });
 
     sceneApiRef.current = {
       resetTargets: (s: Shape) => {
@@ -123,52 +146,71 @@ export function ParticlesPage() {
     };
     window.addEventListener("resize", onResize);
 
-    const tmp = new THREE.Vector3();
     let raf = 0;
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const targets = targetsRef.current;
       const pos = geo.attributes.position.array as Float32Array;
-      const hp = handPosRef.current;
-      // Hand position in world coords (rough): map [0..1] to [-2.4..2.4]
-      const handX = hp.active ? (hp.x - 0.5) * 4.8 : 0;
-      const handY = hp.active ? -(hp.y - 0.5) * 3.6 : 0;
+      const hs = handsRef.current;
+
+      // Map each active hand into world coordinates.
+      const handWorld: Array<{ x: number; y: number; pinch: boolean }> = [];
+      for (let i = 0; i < 2; i++) {
+        const h = hs[i];
+        if (!h.active) {
+          cursorMeshes[i].visible = false;
+          continue;
+        }
+        const wx = (h.x - 0.5) * 5.5;
+        const wy = -(h.y - 0.5) * 4.0;
+        handWorld.push({ x: wx, y: wy, pinch: h.pinch });
+        cursorMeshes[i].position.set(wx, wy, 0.4);
+        cursorMeshes[i].visible = true;
+        // pulse on pinch
+        const s = h.pinch ? 1.4 + Math.sin(performance.now() / 80) * 0.25 : 1;
+        cursorMeshes[i].scale.setScalar(s);
+        (cursorMeshes[i].material as THREE.MeshBasicMaterial).opacity = h.pinch
+          ? 0.85
+          : 0.5;
+      }
+
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         const ix = i * 3;
-        // attract toward target
         let tx = targets[ix + 0];
         let ty = targets[ix + 1];
         let tz = targets[ix + 2];
 
-        if (hp.active) {
-          // hand pulls/pushes nearby particles
-          const dx = pos[ix + 0] - handX;
-          const dy = pos[ix + 1] - handY;
+        // Apply force from each active hand.
+        for (const hw of handWorld) {
+          const dx = pos[ix + 0] - hw.x;
+          const dy = pos[ix + 1] - hw.y;
           const dz = pos[ix + 2];
           const d2 = dx * dx + dy * dy + dz * dz + 0.05;
-          if (d2 < 1.4) {
-            const force = hp.pinch ? -0.5 : 0.6; // pinch attracts, open pushes
-            const f = force / d2;
-            tx += dx * f * 0.4;
-            ty += dy * f * 0.4;
-            tz += dz * f * 0.4;
+          // Bigger reach + stronger force than before.
+          if (d2 < 6.5) {
+            const sign = hw.pinch ? -1 : 1; // pinch attracts, open palm pushes
+            // Inverse falloff with a soft floor — strong near, gentle far
+            const mag = (3.2 / (d2 + 0.4)) * sign;
+            tx += dx * mag;
+            ty += dy * mag;
+            tz += dz * mag * 0.5;
           }
         }
 
+        // Spring + damping
         velocities[ix + 0] +=
-          (tx - pos[ix + 0]) * 0.025 - velocities[ix + 0] * 0.12;
+          (tx - pos[ix + 0]) * 0.05 - velocities[ix + 0] * 0.18;
         velocities[ix + 1] +=
-          (ty - pos[ix + 1]) * 0.025 - velocities[ix + 1] * 0.12;
+          (ty - pos[ix + 1]) * 0.05 - velocities[ix + 1] * 0.18;
         velocities[ix + 2] +=
-          (tz - pos[ix + 2]) * 0.025 - velocities[ix + 2] * 0.12;
+          (tz - pos[ix + 2]) * 0.05 - velocities[ix + 2] * 0.18;
         pos[ix + 0] += velocities[ix + 0];
         pos[ix + 1] += velocities[ix + 1];
         pos[ix + 2] += velocities[ix + 2];
       }
       geo.attributes.position.needsUpdate = true;
-      points.rotation.y += 0.0015;
-      tmp.set(0, 0, 0);
-      camera.lookAt(tmp);
+      points.rotation.y += 0.0012;
+      camera.lookAt(0, 0, 0);
       renderer.render(scene, camera);
     };
     tick();
@@ -178,13 +220,14 @@ export function ParticlesPage() {
       window.removeEventListener("resize", onResize);
       geo.dispose();
       mat.dispose();
+      cursorGeo.dispose();
+      cursorMats.forEach((m) => m.dispose());
       renderer.dispose();
       if (mount.contains(renderer.domElement))
         mount.removeChild(renderer.domElement);
     };
   }, []);
 
-  // when the user changes shape, recompute targets
   useEffect(() => {
     sceneApiRef.current?.resetTargets(shape);
   }, [shape]);
@@ -195,15 +238,21 @@ export function ParticlesPage() {
       const ctx = pip.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, pip.width, pip.height);
     }
-    if (!r.multiHandLandmarks || r.multiHandLandmarks.length === 0) {
-      handPosRef.current.active = false;
-      return;
+    const lms = r.multiHandLandmarks ?? [];
+    for (let i = 0; i < 2; i++) {
+      const h = handsRef.current[i];
+      if (i >= lms.length) {
+        h.active = false;
+        prevPinchRef.current[i] = false;
+        continue;
+      }
+      const lm = lms[i];
+      h.x = mirrorX(lm[8].x);
+      h.y = lm[8].y;
+      h.pinch = isPinching(lm, 0.45, prevPinchRef.current[i]);
+      prevPinchRef.current[i] = h.pinch;
+      h.active = true;
     }
-    const lm = r.multiHandLandmarks[0];
-    handPosRef.current.x = mirrorX(lm[8].x);
-    handPosRef.current.y = lm[8].y;
-    handPosRef.current.active = true;
-    handPosRef.current.pinch = isPinching(lm);
   };
 
   const { status, cameraReady } = useHandTracking({ videoRef, onResults });
@@ -211,15 +260,16 @@ export function ParticlesPage() {
   return (
     <ProjectShell
       title="Particle Sculptor"
-      subtitle="Move your hand to sculpt the cloud"
+      subtitle="Push the cloud with one or both hands"
       status={status}
       controls={
         <>
           <div style={{ fontWeight: 600, color: "rgba(220,140,255,0.95)" }}>
             Controls
           </div>
-          <div>Open hand → push particles outward</div>
-          <div>Pinch → attract particles to fingertip</div>
+          <div>Open palm → blasts particles outward</div>
+          <div>Pinch → pulls particles to your fingertip</div>
+          <div>Use both hands for double the chaos</div>
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             {(["heart", "sphere", "free"] as Shape[]).map((s) => (
               <button

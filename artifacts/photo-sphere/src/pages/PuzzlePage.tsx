@@ -4,78 +4,109 @@ import {
   useHandTracking,
   isPinching,
   mirrorX,
-  dist2D,
   type HandsResult,
+  type HandLandmark,
 } from "@/hooks/useHandTracking";
 
 const GRID = 3;
 const PIECE_COUNT = GRID * GRID;
-// A nice photo with a fixed seed so the puzzle is the same every reload
-const PUZZLE_IMAGE = "https://picsum.photos/seed/puzzle-2026/800/800";
+const SETUP_HOLD_FRAMES = 24; // ~0.8s at 30fps
+
+type Phase = "setup" | "play" | "solved";
 
 interface Piece {
   id: number;
-  // current screen position of the piece centre, in normalized [0..1] coords
   x: number;
-  y: number;
-  // whether snapped to its correct slot
+  y: number; // current centre, normalised
   placed: boolean;
 }
 
 interface SlotRect {
-  // canvas-pixel coords + tile size
   x: number;
   y: number;
   size: number;
 }
 
-function computeBoard(canvasW: number, canvasH: number) {
-  const size = Math.min(canvasW, canvasH) * 0.62;
-  const boardX = (canvasW - size) / 2;
-  const boardY = (canvasH - size) / 2;
-  const tileSize = size / GRID;
-  return { size, boardX, boardY, tileSize };
+interface CapturedRect {
+  // normalised across the canvas
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
-function slotForPieceId(
-  id: number,
-  canvasW: number,
-  canvasH: number,
-): SlotRect {
-  const { boardX, boardY, tileSize } = computeBoard(canvasW, canvasH);
-  const r = Math.floor(id / GRID);
-  const c = id % GRID;
+function pinchPoint(lm: HandLandmark[]): { x: number; y: number } {
+  // midpoint of thumb-tip + index-tip, mirrored x to match visible video
   return {
-    x: boardX + c * tileSize + tileSize / 2,
-    y: boardY + r * tileSize + tileSize / 2,
-    size: tileSize,
+    x: mirrorX((lm[4].x + lm[8].x) / 2),
+    y: (lm[4].y + lm[8].y) / 2,
   };
 }
 
-function scatterPieces(canvasW: number, canvasH: number): Piece[] {
-  // Scatter pieces along the top + sides + bottom margins, outside the board.
-  const { boardX, boardY, size } = computeBoard(canvasW, canvasH);
-  const margin = 80;
+function computeBoard(canvasW: number, canvasH: number, rect: CapturedRect) {
+  // Board occupies the centre of the screen, sized from the captured aspect ratio
+  const aspect = (rect.w * canvasW) / Math.max(rect.h * canvasH, 1);
+  const maxSize = Math.min(canvasW, canvasH) * 0.6;
+  let bw: number;
+  let bh: number;
+  if (aspect >= 1) {
+    bw = maxSize;
+    bh = maxSize / aspect;
+  } else {
+    bh = maxSize;
+    bw = maxSize * aspect;
+  }
+  const boardX = (canvasW - bw) / 2;
+  const boardY = (canvasH - bh) / 2;
+  return {
+    bw,
+    bh,
+    boardX,
+    boardY,
+    tileW: bw / GRID,
+    tileH: bh / GRID,
+  };
+}
+
+function slotForPiece(
+  id: number,
+  canvasW: number,
+  canvasH: number,
+  rect: CapturedRect,
+): SlotRect {
+  const { boardX, boardY, tileW, tileH } = computeBoard(canvasW, canvasH, rect);
+  const r = Math.floor(id / GRID);
+  const c = id % GRID;
+  return {
+    x: boardX + c * tileW + tileW / 2,
+    y: boardY + r * tileH + tileH / 2,
+    size: Math.min(tileW, tileH),
+  };
+}
+
+function scatterPieces(
+  canvasW: number,
+  canvasH: number,
+  rect: CapturedRect,
+): Piece[] {
+  const { boardX, boardY, bw, bh } = computeBoard(canvasW, canvasH, rect);
+  const margin = 70;
   const positions: Array<{ x: number; y: number }> = [];
-  const tries = 80;
   while (positions.length < PIECE_COUNT) {
     let placed = false;
-    for (let t = 0; t < tries && !placed; t++) {
+    for (let t = 0; t < 80 && !placed; t++) {
       const x = margin + Math.random() * (canvasW - margin * 2);
       const y = margin + Math.random() * (canvasH - margin * 2);
-      // reject if inside the board area
       if (
         x > boardX - margin &&
-        x < boardX + size + margin &&
+        x < boardX + bw + margin &&
         y > boardY - margin &&
-        y < boardY + size + margin
-      ) {
+        y < boardY + bh + margin
+      )
         continue;
-      }
-      // reject if too close to an existing piece
       let ok = true;
       for (const p of positions) {
-        if (Math.hypot(p.x - x, p.y - y) < 110) {
+        if (Math.hypot(p.x - x, p.y - y) < 100) {
           ok = false;
           break;
         }
@@ -86,14 +117,12 @@ function scatterPieces(canvasW: number, canvasH: number): Piece[] {
       }
     }
     if (!placed) {
-      // fallback: place against bottom edge
       positions.push({
         x: margin + Math.random() * (canvasW - margin * 2),
         y: canvasH - margin,
       });
     }
   }
-  // assign ids in shuffled order so the spatial layout doesn't leak the answer
   const ids = Array.from({ length: PIECE_COUNT }, (_, i) => i);
   for (let i = ids.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -111,67 +140,112 @@ export function PuzzlePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayPipRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imageRef = useRef<HTMLImageElement | null>(null);
 
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [solved, setSolved] = useState(false);
+  const [phase, setPhase] = useState<Phase>("setup");
   const [moves, setMoves] = useState(0);
 
+  // Captured puzzle area (in normalised canvas coords) and the captured pixels.
+  const capturedRectRef = useRef<CapturedRect | null>(null);
+  const capturedImgRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Setup-phase state
+  const setupRef = useRef<{
+    leftPinch: { x: number; y: number } | null;
+    rightPinch: { x: number; y: number } | null;
+    holdFrames: number;
+  }>({ leftPinch: null, rightPinch: null, holdFrames: 0 });
+
+  // Play-phase state
   const piecesRef = useRef<Piece[]>([]);
   const grabbedRef = useRef<number | null>(null);
   const cursorRef = useRef({
     x: 0.5,
     y: 0.5,
-    tx: 0.5,
-    ty: 0.5,
-    ix: 0.5,
-    iy: 0.5,
     visible: false,
     pinching: false,
   });
-  const prevPinchRef = useRef(false);
+  const prevPinchRef = useRef([false, false]);
 
-  // Load reference image once
+  const phaseRef = useRef<Phase>("setup");
   useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      imageRef.current = img;
-      setImageLoaded(true);
-    };
-    img.onerror = () => {
-      // fallback: still mark loaded so the game can run with placeholder fills
-      setImageLoaded(true);
-    };
-    img.src = PUZZLE_IMAGE;
-  }, []);
+    phaseRef.current = phase;
+  }, [phase]);
 
-  function reset() {
-    const c = canvasRef.current;
-    if (!c) return;
-    piecesRef.current = scatterPieces(c.clientWidth, c.clientHeight);
+  function resetToSetup() {
+    capturedRectRef.current = null;
+    capturedImgRef.current = null;
+    piecesRef.current = [];
     grabbedRef.current = null;
-    setSolved(false);
+    setupRef.current = {
+      leftPinch: null,
+      rightPinch: null,
+      holdFrames: 0,
+    };
     setMoves(0);
+    setPhase("setup");
   }
 
-  // Initialise pieces once the image is loaded and the canvas is sized
-  useEffect(() => {
-    if (!imageLoaded) return;
-    const c = canvasRef.current;
-    if (!c) return;
-    if (piecesRef.current.length === 0) {
-      piecesRef.current = scatterPieces(c.clientWidth, c.clientHeight);
+  // Capture the rectangle currently spanning the two pinch points.
+  function captureRegion(p1: { x: number; y: number }, p2: { x: number; y: number }) {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video || video.readyState !== 4 || video.videoWidth === 0)
+      return;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const x = Math.max(0, Math.min(p1.x, p2.x));
+    const y = Math.max(0, Math.min(p1.y, p2.y));
+    const rw = Math.min(1, Math.abs(p2.x - p1.x));
+    const rh = Math.min(1, Math.abs(p2.y - p1.y));
+    if (rw < 0.08 || rh < 0.08) return; // too small
+
+    // Map normalised canvas rect to source video coords.
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const scale = Math.max(w / vw, h / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const offX = (w - dw) / 2;
+    const offY = (h - dh) / 2;
+    // Canvas pixels of the rect
+    const cx = x * w;
+    const cy = y * h;
+    const cw = rw * w;
+    const ch = rh * h;
+    // Convert canvas pixels to video pixels (account for mirrored video).
+    const sx = (w - (cx + cw) - offX) / scale; // mirror flip
+    const sy = (cy - offY) / scale;
+    const sw = cw / scale;
+    const sh = ch / scale;
+
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(sw));
+    out.height = Math.max(1, Math.round(sh));
+    const octx = out.getContext("2d");
+    if (!octx) return;
+    // Draw mirrored so the captured image matches what the user saw.
+    octx.translate(out.width, 0);
+    octx.scale(-1, 1);
+    try {
+      octx.drawImage(video, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    } catch {
+      return;
     }
-  }, [imageLoaded]);
+
+    capturedImgRef.current = out;
+    capturedRectRef.current = { x, y, w: rw, h: rh };
+    piecesRef.current = scatterPieces(w, h, capturedRectRef.current);
+    setMoves(0);
+    setPhase("play");
+  }
 
   // Render loop
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     let raf = 0;
     const draw = () => {
       raf = requestAnimationFrame(draw);
@@ -180,13 +254,81 @@ export function PuzzlePage() {
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
-        // re-scatter on first sizing if pieces aren't placed yet
-        if (piecesRef.current.length === 0 && imageLoaded) {
-          piecesRef.current = scatterPieces(w, h);
-        }
       }
 
-      // background
+      ctx.fillStyle = "#030310";
+      ctx.fillRect(0, 0, w, h);
+
+      const ph = phaseRef.current;
+      if (ph === "setup") {
+        // Show the live mirrored webcam, dimmed.
+        if (video.readyState === 4 && video.videoWidth > 0) {
+          ctx.save();
+          ctx.translate(w, 0);
+          ctx.scale(-1, 1);
+          const vw = video.videoWidth;
+          const vh = video.videoHeight;
+          const scale = Math.max(w / vw, h / vh);
+          const dw = vw * scale;
+          const dh = vh * scale;
+          ctx.globalAlpha = 0.85;
+          ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh);
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
+        ctx.fillStyle = "rgba(3,3,16,0.45)";
+        ctx.fillRect(0, 0, w, h);
+
+        // Setup overlay: show the rectangle being framed
+        const s = setupRef.current;
+        if (s.leftPinch && s.rightPinch) {
+          const x1 = s.leftPinch.x * w;
+          const y1 = s.leftPinch.y * h;
+          const x2 = s.rightPinch.x * w;
+          const y2 = s.rightPinch.y * h;
+          const rx = Math.min(x1, x2);
+          const ry = Math.min(y1, y2);
+          const rw = Math.abs(x2 - x1);
+          const rh = Math.abs(y2 - y1);
+          // Glow rect
+          ctx.strokeStyle = "rgba(140,255,200,0.95)";
+          ctx.shadowColor = "rgba(140,255,200,0.9)";
+          ctx.shadowBlur = 18;
+          ctx.lineWidth = 3;
+          ctx.strokeRect(rx, ry, rw, rh);
+          ctx.shadowBlur = 0;
+          // Hold progress bar at the bottom of the rect
+          const pct = Math.min(1, s.holdFrames / SETUP_HOLD_FRAMES);
+          ctx.fillStyle = "rgba(140,255,200,0.85)";
+          ctx.fillRect(rx, ry + rh + 6, rw * pct, 5);
+          ctx.fillStyle = "rgba(140,255,200,0.2)";
+          ctx.fillRect(rx + rw * pct, ry + rh + 6, rw * (1 - pct), 5);
+          // Pinch dots at the corners
+          for (const p of [s.leftPinch, s.rightPinch]) {
+            ctx.fillStyle = "rgba(140,255,200,0.95)";
+            ctx.beginPath();
+            ctx.arc(p.x * w, p.y * h, 9, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else {
+          // Helpful hints
+          ctx.fillStyle = "rgba(180,220,255,0.9)";
+          ctx.font = "16px 'Inter', sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(
+            "Pinch BOTH hands to frame an area, then hold",
+            w / 2,
+            h / 2,
+          );
+          // Visual hand hints
+          if (s.leftPinch) drawPinchHint(ctx, s.leftPinch.x * w, s.leftPinch.y * h);
+          if (s.rightPinch) drawPinchHint(ctx, s.rightPinch.x * w, s.rightPinch.y * h);
+          ctx.textAlign = "left";
+        }
+        return;
+      }
+
+      // PLAY / SOLVED phase
       const grad = ctx.createRadialGradient(
         w / 2,
         h / 2,
@@ -200,48 +342,43 @@ export function PuzzlePage() {
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
 
-      const { boardX, boardY, size, tileSize } = computeBoard(w, h);
+      const rect = capturedRectRef.current;
+      const img = capturedImgRef.current;
+      if (!rect || !img) return;
 
-      // Board outline + slot grid
-      ctx.strokeStyle = "rgba(120,200,255,0.35)";
+      const board = computeBoard(w, h, rect);
+      // Board outline + faint preview
+      ctx.strokeStyle = "rgba(140,255,200,0.4)";
       ctx.lineWidth = 2;
-      ctx.strokeRect(boardX - 4, boardY - 4, size + 8, size + 8);
-      ctx.strokeStyle = "rgba(120,200,255,0.12)";
+      ctx.strokeRect(board.boardX - 4, board.boardY - 4, board.bw + 8, board.bh + 8);
+      ctx.globalAlpha = 0.1;
+      ctx.drawImage(img, board.boardX, board.boardY, board.bw, board.bh);
+      ctx.globalAlpha = 1;
+      // Slot grid lines
+      ctx.strokeStyle = "rgba(140,255,200,0.15)";
       ctx.lineWidth = 1;
       for (let i = 1; i < GRID; i++) {
         ctx.beginPath();
-        ctx.moveTo(boardX + i * tileSize, boardY);
-        ctx.lineTo(boardX + i * tileSize, boardY + size);
-        ctx.moveTo(boardX, boardY + i * tileSize);
-        ctx.lineTo(boardX + size, boardY + i * tileSize);
+        ctx.moveTo(board.boardX + i * board.tileW, board.boardY);
+        ctx.lineTo(board.boardX + i * board.tileW, board.boardY + board.bh);
+        ctx.moveTo(board.boardX, board.boardY + i * board.tileH);
+        ctx.lineTo(board.boardX + board.bw, board.boardY + i * board.tileH);
         ctx.stroke();
       }
-      // Faint preview of the full image inside the board
-      if (imageRef.current) {
-        ctx.globalAlpha = 0.08;
-        ctx.drawImage(imageRef.current, boardX, boardY, size, size);
-        ctx.globalAlpha = 1;
-      }
 
-      // Smooth the cursor toward the target a bit (extra UI smoothing)
       const cur = cursorRef.current;
-      cur.x += (cur.tx - cur.x) * 0.6;
-      cur.y += (cur.ty - cur.y) * 0.6;
-
       const cursorPxX = cur.x * w;
       const cursorPxY = cur.y * h;
       const grabbed = grabbedRef.current;
 
-      // Highlight which piece would be grabbed
+      // Hover detection
       let hoverId: number | null = null;
-      if (cur.visible && grabbed === null && !solved) {
+      if (cur.visible && grabbed === null && phaseRef.current === "play") {
         let best = -1;
-        let bestD = 90; // px
+        let bestD = 90;
         for (const p of piecesRef.current) {
           if (p.placed) continue;
-          const px = p.x * w;
-          const py = p.y * h;
-          const d = Math.hypot(px - cursorPxX, py - cursorPxY);
+          const d = Math.hypot(p.x * w - cursorPxX, p.y * h - cursorPxY);
           if (d < bestD) {
             bestD = d;
             best = p.id;
@@ -250,7 +387,6 @@ export function PuzzlePage() {
         hoverId = best === -1 ? null : best;
       }
 
-      // While grabbed, the piece follows the cursor
       if (grabbed !== null) {
         const piece = piecesRef.current.find((p) => p.id === grabbed);
         if (piece) {
@@ -259,7 +395,6 @@ export function PuzzlePage() {
         }
       }
 
-      // Draw all pieces (placed first, then floating, then the grabbed one on top)
       const ordered = [...piecesRef.current].sort((a, b) => {
         if (a.placed && !b.placed) return -1;
         if (!a.placed && b.placed) return 1;
@@ -271,8 +406,9 @@ export function PuzzlePage() {
         drawPiece(
           ctx,
           piece,
-          imageRef.current,
-          tileSize,
+          img,
+          board.tileW,
+          board.tileH,
           w,
           h,
           piece.id === hoverId,
@@ -280,10 +416,9 @@ export function PuzzlePage() {
         );
       }
 
-      // Draw the cursor / frame
-      if (cur.visible) {
+      // Cursor
+      if (cur.visible && phaseRef.current === "play") {
         if (cur.pinching) {
-          // Pinched cursor: small filled cyan dot
           ctx.fillStyle = "rgba(140,255,200,0.95)";
           ctx.shadowColor = "rgba(140,255,200,0.8)";
           ctx.shadowBlur = 16;
@@ -292,38 +427,19 @@ export function PuzzlePage() {
           ctx.fill();
           ctx.shadowBlur = 0;
         } else {
-          // Frame mode: draw an L between thumb tip and index tip
-          const ix = cur.ix * w;
-          const iy = cur.iy * h;
-          const tx = cur.tx * w;
-          const ty = cur.ty * h;
-          ctx.strokeStyle = hoverId !== null
-            ? "rgba(160,255,200,0.9)"
-            : "rgba(120,200,255,0.85)";
-          ctx.shadowColor = ctx.strokeStyle;
-          ctx.shadowBlur = 10;
-          ctx.lineWidth = 3;
-          ctx.lineCap = "round";
-          // Two perpendicular strokes meeting at the cursor centre
-          ctx.beginPath();
-          ctx.moveTo(ix, iy);
-          ctx.lineTo(cursorPxX, cursorPxY);
-          ctx.lineTo(tx, ty);
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-          // Small target ring
           ctx.beginPath();
           ctx.arc(cursorPxX, cursorPxY, 16, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(180,220,255,0.4)";
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = hoverId !== null
+            ? "rgba(160,255,200,0.95)"
+            : "rgba(180,220,255,0.5)";
+          ctx.lineWidth = 2;
           ctx.stroke();
         }
       }
 
-      // Solved overlay
-      if (solved) {
+      if (phaseRef.current === "solved") {
         ctx.fillStyle = "rgba(0,15,5,0.55)";
-        ctx.fillRect(boardX - 4, boardY - 4, size + 8, size + 8);
+        ctx.fillRect(board.boardX - 4, board.boardY - 4, board.bw + 8, board.bh + 8);
         ctx.fillStyle = "rgba(160,255,200,0.95)";
         ctx.font = "600 36px 'Inter', sans-serif";
         ctx.textAlign = "center";
@@ -333,59 +449,112 @@ export function PuzzlePage() {
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [imageLoaded, solved]);
+  }, []);
+
+  // Drop / snap logic
+  function tryDropAt(pieceId: number, cxNorm: number, cyNorm: number) {
+    const canvas = canvasRef.current;
+    const rect = capturedRectRef.current;
+    if (!canvas || !rect) return;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const slot = slotForPiece(pieceId, w, h, rect);
+    const cursorPxX = cxNorm * w;
+    const cursorPxY = cyNorm * h;
+    const piece = piecesRef.current.find((p) => p.id === pieceId);
+    if (!piece) return;
+    const dist = Math.hypot(cursorPxX - slot.x, cursorPxY - slot.y);
+    if (dist < slot.size * 0.55) {
+      piece.x = slot.x / w;
+      piece.y = slot.y / h;
+      piece.placed = true;
+      if (piecesRef.current.every((p) => p.placed)) setPhase("solved");
+    }
+  }
 
   // Hand tracking
   const onResults = (r: HandsResult) => {
-    // Clear PIP overlay (we don't render landmarks there)
     const pip = overlayPipRef.current;
     if (pip) {
       const ctx = pip.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, pip.width, pip.height);
     }
 
-    const cur = cursorRef.current;
-    if (!r.multiHandLandmarks || r.multiHandLandmarks.length === 0) {
-      cur.visible = false;
-      cur.pinching = false;
-      prevPinchRef.current = false;
-      // Drop any grabbed piece
+    const lms = r.multiHandLandmarks ?? [];
+    if (phaseRef.current === "setup") {
+      // Need both hands to define the rect
+      if (lms.length < 2) {
+        setupRef.current.leftPinch = null;
+        setupRef.current.rightPinch = null;
+        setupRef.current.holdFrames = 0;
+        prevPinchRef.current = [false, false];
+        // Show single-hand pinch dot anyway, for feedback
+        if (lms.length === 1) {
+          const p1 = isPinching(lms[0], 0.45, prevPinchRef.current[0]);
+          prevPinchRef.current[0] = p1;
+          if (p1) {
+            const pt = pinchPoint(lms[0]);
+            // Just use it as the "left" preview
+            setupRef.current.leftPinch = pt;
+          }
+        }
+        return;
+      }
+      // Two hands present. Pinch each independently with hysteresis.
+      const p0 = isPinching(lms[0], 0.45, prevPinchRef.current[0]);
+      const p1 = isPinching(lms[1], 0.45, prevPinchRef.current[1]);
+      prevPinchRef.current = [p0, p1];
+      if (!p0 || !p1) {
+        setupRef.current.leftPinch = null;
+        setupRef.current.rightPinch = null;
+        setupRef.current.holdFrames = 0;
+        return;
+      }
+      // Order hands by x: leftmost on screen vs rightmost.
+      const a = pinchPoint(lms[0]);
+      const b = pinchPoint(lms[1]);
+      const left = a.x < b.x ? a : b;
+      const right = a.x < b.x ? b : a;
+      setupRef.current.leftPinch = left;
+      setupRef.current.rightPinch = right;
+      setupRef.current.holdFrames++;
+      if (setupRef.current.holdFrames >= SETUP_HOLD_FRAMES) {
+        captureRegion(left, right);
+        setupRef.current.holdFrames = 0;
+      }
+      return;
+    }
+
+    // PLAY phase
+    if (lms.length === 0) {
+      cursorRef.current.visible = false;
+      cursorRef.current.pinching = false;
+      prevPinchRef.current[0] = false;
       if (grabbedRef.current !== null) {
-        tryDropAt(grabbedRef.current, cur.x, cur.y);
+        tryDropAt(grabbedRef.current, cursorRef.current.x, cursorRef.current.y);
         grabbedRef.current = null;
       }
       return;
     }
-    const lm = r.multiHandLandmarks[0];
-    const idxX = mirrorX(lm[8].x);
-    const idxY = lm[8].y;
-    const thX = mirrorX(lm[4].x);
-    const thY = lm[4].y;
-    const cx = (idxX + thX) / 2;
-    const cy = (idxY + thY) / 2;
-    cur.tx = cx;
-    cur.ty = cy;
-    cur.ix = idxX;
-    cur.iy = idxY;
-    cur.visible = true;
-
-    const wasPinching = prevPinchRef.current;
+    const lm = lms[0];
+    const pt = pinchPoint(lm);
+    cursorRef.current.x = pt.x;
+    cursorRef.current.y = pt.y;
+    cursorRef.current.visible = true;
+    const wasPinching = prevPinchRef.current[0];
     const pinching = isPinching(lm, 0.45, wasPinching);
-    cur.pinching = pinching;
+    cursorRef.current.pinching = pinching;
 
     if (pinching && !wasPinching) {
-      // GRAB: pick the closest unplaced piece within range
       const canvas = canvasRef.current;
       if (canvas) {
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
-        const cursorPxX = cx * w;
-        const cursorPxY = cy * h;
         let best = -1;
         let bestD = 110;
         for (const p of piecesRef.current) {
           if (p.placed) continue;
-          const d = Math.hypot(p.x * w - cursorPxX, p.y * h - cursorPxY);
+          const d = Math.hypot(p.x * w - pt.x * w, p.y * h - pt.y * h);
           if (d < bestD) {
             bestD = d;
             best = p.id;
@@ -394,145 +563,69 @@ export function PuzzlePage() {
         if (best !== -1) grabbedRef.current = best;
       }
     } else if (!pinching && wasPinching) {
-      // RELEASE: try to snap
       if (grabbedRef.current !== null) {
-        tryDropAt(grabbedRef.current, cx, cy);
+        tryDropAt(grabbedRef.current, pt.x, pt.y);
         grabbedRef.current = null;
         setMoves((m) => m + 1);
       }
     }
-    prevPinchRef.current = pinching;
+    prevPinchRef.current[0] = pinching;
   };
 
-  function tryDropAt(pieceId: number, cxNorm: number, cyNorm: number) {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    const slot = slotForPieceId(pieceId, w, h);
-    const cursorPxX = cxNorm * w;
-    const cursorPxY = cyNorm * h;
-    const piece = piecesRef.current.find((p) => p.id === pieceId);
-    if (!piece) return;
-    const dx = cursorPxX - slot.x;
-    const dy = cursorPxY - slot.y;
-    const dist = Math.hypot(dx, dy);
-    const tolerance = slot.size * 0.5;
-    if (dist < tolerance) {
-      piece.x = slot.x / w;
-      piece.y = slot.y / h;
-      piece.placed = true;
-      // Check solved
-      if (piecesRef.current.every((p) => p.placed)) {
-        setSolved(true);
-      }
-    }
-  }
-
   const { status, cameraReady } = useHandTracking({ videoRef, onResults });
-
-  // Mouse fallback: click-and-drag pieces
-  const mouseStateRef = useRef<{
-    grabbed: number | null;
-    last: { x: number; y: number } | null;
-  }>({ grabbed: null, last: null });
-
-  function getMouseNorm(e: React.MouseEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) / rect.width,
-      y: (e.clientY - rect.top) / rect.height,
-    };
-  }
-  function onMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
-    const { x, y } = getMouseNorm(e);
-    const canvas = canvasRef.current!;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    let best = -1;
-    let bestD = 90;
-    for (const p of piecesRef.current) {
-      if (p.placed) continue;
-      const d = Math.hypot(p.x * w - x * w, p.y * h - y * h);
-      if (d < bestD) {
-        bestD = d;
-        best = p.id;
-      }
-    }
-    if (best !== -1) {
-      mouseStateRef.current.grabbed = best;
-      mouseStateRef.current.last = { x, y };
-    }
-  }
-  function onMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (mouseStateRef.current.grabbed === null) return;
-    const { x, y } = getMouseNorm(e);
-    const piece = piecesRef.current.find(
-      (p) => p.id === mouseStateRef.current.grabbed,
-    );
-    if (piece) {
-      piece.x = x;
-      piece.y = y;
-    }
-  }
-  function onMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (mouseStateRef.current.grabbed === null) return;
-    const { x, y } = getMouseNorm(e);
-    tryDropAt(mouseStateRef.current.grabbed, x, y);
-    mouseStateRef.current.grabbed = null;
-    setMoves((m) => m + 1);
-  }
 
   return (
     <ProjectShell
       title="Jigsaw Puzzle"
-      subtitle="Frame a piece · pinch to grab · release on the right slot"
-      status={`${status} · ${moves} drops${solved ? " · solved" : ""}`}
+      subtitle={
+        phase === "setup"
+          ? "Pinch with both hands to frame an area, then hold"
+          : "Pinch a piece, drag, release on the matching slot"
+      }
+      status={`${status} · ${phase}${phase === "play" ? ` · ${moves} drops` : ""}`}
       controls={
         <>
           <div style={{ fontWeight: 600, color: "rgba(160,255,200,0.95)" }}>
             How to play
           </div>
-          <div>1. Spread thumb + index to form a frame</div>
-          <div>2. Move the frame over a piece</div>
-          <div>3. Pinch fingers together to grab it</div>
-          <div>4. Drag to the matching slot, then release</div>
-          <div style={{ marginTop: 4, color: "rgba(140,160,200,0.7)" }}>
-            Mouse fallback: click and drag pieces
-          </div>
-          <button
-            onClick={reset}
-            style={{
-              marginTop: 8,
-              background: "rgba(80,200,140,0.2)",
-              border: "1px solid rgba(120,255,180,0.4)",
-              color: "rgba(200,255,220,0.95)",
-              padding: "6px 14px",
-              borderRadius: 8,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            Shuffle
-          </button>
+          {phase === "setup" ? (
+            <>
+              <div>1. Stand back so both hands are in frame</div>
+              <div>2. Pinch with each hand to mark two corners</div>
+              <div>3. Hold the pinch — the area inside becomes the puzzle</div>
+            </>
+          ) : (
+            <>
+              <div>Pinch on a piece to grab it</div>
+              <div>Drag it onto the matching slot</div>
+              <div>Release — it snaps into place</div>
+              <button
+                onClick={resetToSetup}
+                style={{
+                  marginTop: 8,
+                  background: "rgba(80,200,140,0.2)",
+                  border: "1px solid rgba(120,255,180,0.4)",
+                  color: "rgba(200,255,220,0.95)",
+                  padding: "6px 14px",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Capture a new area
+              </button>
+            </>
+          )}
         </>
       }
     >
       <canvas
         ref={canvasRef}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={() => {
-          mouseStateRef.current.grabbed = null;
-        }}
         style={{
           position: "absolute",
           inset: 0,
           width: "100%",
           height: "100%",
-          cursor: mouseStateRef.current.grabbed !== null ? "grabbing" : "grab",
         }}
       />
       <CameraPip
@@ -545,11 +638,26 @@ export function PuzzlePage() {
   );
 }
 
+function drawPinchHint(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+) {
+  ctx.fillStyle = "rgba(140,255,200,0.85)";
+  ctx.shadowColor = "rgba(140,255,200,0.8)";
+  ctx.shadowBlur = 14;
+  ctx.beginPath();
+  ctx.arc(x, y, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
 function drawPiece(
   ctx: CanvasRenderingContext2D,
   piece: Piece,
-  img: HTMLImageElement | null,
-  tileSize: number,
+  img: HTMLCanvasElement,
+  tileW: number,
+  tileH: number,
   canvasW: number,
   canvasH: number,
   hovered: boolean,
@@ -557,9 +665,8 @@ function drawPiece(
 ) {
   const cx = piece.x * canvasW;
   const cy = piece.y * canvasH;
-  const half = tileSize / 2;
-  const x = cx - half;
-  const y = cy - half;
+  const x = cx - tileW / 2;
+  const y = cy - tileH / 2;
 
   ctx.save();
   if (grabbed) {
@@ -576,29 +683,12 @@ function drawPiece(
     ctx.shadowBlur = 10;
   }
 
-  if (img) {
-    const sr = Math.floor(piece.id / GRID);
-    const sc = piece.id % GRID;
-    const sw = img.width / GRID;
-    const sh = img.height / GRID;
-    ctx.drawImage(
-      img,
-      sc * sw,
-      sr * sh,
-      sw,
-      sh,
-      x,
-      y,
-      tileSize,
-      tileSize,
-    );
-  } else {
-    // placeholder rectangle keyed by id
-    ctx.fillStyle = `hsl(${(piece.id * 41) % 360}, 60%, 55%)`;
-    ctx.fillRect(x, y, tileSize, tileSize);
-  }
+  const sr = Math.floor(piece.id / GRID);
+  const sc = piece.id % GRID;
+  const sw = img.width / GRID;
+  const sh = img.height / GRID;
+  ctx.drawImage(img, sc * sw, sr * sh, sw, sh, x, y, tileW, tileH);
 
-  // Border
   ctx.shadowBlur = 0;
   ctx.lineWidth = grabbed ? 3 : hovered ? 2 : 1.5;
   ctx.strokeStyle = grabbed
@@ -608,6 +698,6 @@ function drawPiece(
     : hovered
     ? "rgba(180,230,255,0.85)"
     : "rgba(255,255,255,0.25)";
-  ctx.strokeRect(x + 0.5, y + 0.5, tileSize - 1, tileSize - 1);
+  ctx.strokeRect(x + 0.5, y + 0.5, tileW - 1, tileH - 1);
   ctx.restore();
 }

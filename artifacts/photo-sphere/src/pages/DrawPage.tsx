@@ -165,7 +165,8 @@ export function DrawPage() {
     const lm = r.multiHandLandmarks[0];
     const px = mirrorX(lm[8].x);
     const py = lm[8].y;
-    const pinching = isPinching(lm, 0.06);
+    // Hysteresis pinch: easier to keep drawing than to start a new stroke.
+    const pinching = isPinching(lm, 0.45, stateRef.current.pinching);
     stateRef.current.fingerX = px;
     stateRef.current.fingerY = py;
     stateRef.current.showFinger = true;
